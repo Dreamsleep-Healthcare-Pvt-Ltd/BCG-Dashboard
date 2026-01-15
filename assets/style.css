@@ -1,0 +1,108 @@
+html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: linear-gradient(135deg, #f6f9ff, #eef3ff);
+    font-family: "Segoe UI", Arial, sans-serif;
+}
+
+/* Layout states */
+.center-layout {
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.top-layout {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Controls bar */
+.controls {
+    background: white;
+    padding: 4px 8px;
+    border-radius: 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+
+/* Single line toolbar */
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Push Next button to far right */
+.spacer {
+    flex: 1;
+}
+
+/* Input strip (HR / RR) */
+.input-strip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #4a4a6a;
+}
+
+.input-strip label {
+    font-weight: 600;
+}
+
+.input-strip input {
+    border-radius: 6px;
+    border: 1px solid #ccd3ff;
+    padding: 3px 5px;
+    height: 26px;
+    width: 52px;
+    font-size: 12px;
+    background: #f8f9ff;
+}
+
+.file-label {
+    font-weight: 600;
+    font-size: 15px;
+    margin-left: 15px;
+    color: #333;
+    white-space: nowrap;
+}
+
+
+/* Dropdown width */
+#file-selector {
+    min-width: 220px;
+}
+
+/* Buttons */
+button {
+    border-radius: 8px;
+    border: none;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+#generate-btn {
+    background: linear-gradient(135deg, #6c7cff, #4b5bff);
+    color: white;
+}
+
+#next-btn {
+    background: linear-gradient(135deg, #ffb347, #ff9248);
+    color: white;
+}
+
+#prev-btn {
+    background: linear-gradient(135deg, #7f8cff, #5665ff);
+    color: white;
+}
+
+#upload-files button {
+    background: linear-gradient(135deg, #3ddc97, #21b87a);
+    color: white;
+}
