@@ -1,10 +1,13 @@
 import struct
 import logging
 from typing import Iterator, Tuple, List, Optional
+import numpy as np
 import plotly.graph_objects as go
 
 
 FRAME_SIZE  = 813
+FSR_FRAME_SIZE = 15
+FRAME_SIZE_TEM = 17
 HEADER_SIZE = 10
 MAGIC_HEADER = b'U\xaa'
 MAGIC_FOOTER = b'\xaaU'
@@ -25,6 +28,9 @@ class Reader:
 
     def __init__(self, filename: str) -> None:
         self.filename = filename
+        
+        with open(self.filename, "rb") as f:
+            self.data = f.read()        
 
     def _extract_frames(self, data: bytes, start_magic: bytes, end_magic: bytes) -> Iterator[bytes]:
         """
@@ -62,6 +68,43 @@ class Reader:
         for b in buf:
             c ^= b
         return c
+    
+    def parse_header(self, blob: bytes, max_lines=3):
+        header_lines = blob.split(b'\n', max_lines)[:max_lines]
+
+        result = {}
+        for line in header_lines:
+            text = line.decode("utf-8", errors="strict").strip()
+            if " : " in text:
+                key, value = text.split(" : ", 1)
+                result[key.strip()] = value.strip()
+
+        return result
+    
+    def check_packet_loss(self, packets):
+        """
+        Checks packet loss based on an 8-bit sequence counter (0–255).
+
+        :param packets: iterable of packets, each having a .seq attribute
+        :return: list of tuples (index, lost_count)
+        """
+        prev_seq = None
+        losses = []
+
+        for index, packet in enumerate(packets):
+            curr_seq = packet.seq
+
+            if prev_seq is not None:
+                expected = (prev_seq + 1) % 256
+                if curr_seq != expected:
+                    lost = (curr_seq - expected) % 256
+                    losses.append((index, lost))
+
+            prev_seq = curr_seq
+
+        return losses
+
+
 
     def frames(self) -> Iterator[Tuple[int, int, int, bytes, int, int, int]]:
         """
@@ -75,10 +118,13 @@ class Reader:
         with open(self.filename, "rb") as f:
             data = f.read()
         for frame in self._extract_frames(data, MAGIC_HEADER, MAGIC_FOOTER):
-            print(len(frame))
-            if len(frame) != FRAME_SIZE:
-                logger.debug("Skipping frame with unexpected length %d", len(frame))
-                continue
+            # if len(frame) != FRAME_SIZE:
+            #     logger.debug("Skipping frame with unexpected length %d", len(frame))
+            #     continue
+            if (len(frame) != FRAME_SIZE):
+                if len(frame) != FSR_FRAME_SIZE:
+                    if len(frame) != FRAME_SIZE_TEM:
+                        continue
 
             # verify header (first 2 bytes)
             if struct.unpack_from("<H", frame, 0)[0] != struct.unpack_from("<H", MAGIC_HEADER, 0)[0]:
@@ -86,7 +132,7 @@ class Reader:
                 continue
 
             sensor_type = frame[2]
-            epoch_time = struct.unpack_from(">I", frame, 3)[0]
+            epoch_time = struct.unpack_from("<I", frame, 3)[0]
             frame_counter = struct.unpack_from("<H", frame, 7)[0]
             metadata_bytes = frame[8]
             sensor_status = frame[9]
@@ -120,25 +166,85 @@ class Reader:
         channel_1: List[int] = []
         channel_2: List[int] = []
         gain_list: List[int] = []
+        fsr_values: List[int] = []
+        fsr_time: List[int] = []
+        cont_seq_counter: List[int] = []
         last_epoch: Optional[int] = None
+        position = 0
 
+        header_meta_data = self.parse_header(self.data)
+
+        prev_seq = None
+        previous_median_ch1 = None 
+        previous_median_ch2 = None
+
+        calculate_packet_loss = 0
+        total_frames = 0
+        epoch_time_list = []
+        # prev = None
         for sensor_type, epoch_time, frame_counter, payload, metadata_bytes, sensor_status, checksum in self.frames():
-            if sensor_type != 1:
-                logger.debug("Skipping non-BCG frame %d of type %d", frame_counter, sensor_type)
-                continue
-            try:
-                values = [v[0] for v in struct.iter_unpack("<i", payload[:-3])]
-            except struct.error:
-                logger.warning("frame %s: failed to unpack payload, skipping", frame_counter)
-                continue
+            
+            # if prev == None:
+            #     prev = frame_counter
+            # else:
+            #     delta = frame_counter - prev
+            #     if (delta != 1) | (delta != -255):
+            lost = 0
 
-            if len(values) != 200:
-                logger.warning("frame %s: unexpected sample count %d, skipping", frame_counter, len(values))
-                continue
+            if sensor_type == 1:
+                curr_seq = frame_counter
+                if prev_seq is not None:
+                    expected = (prev_seq + 1) % 256
+                    if curr_seq != expected:
+                        lost = (curr_seq - expected) % 256
+                        logger.debug("Packet loss detected: %d packets lost", lost)
 
-            channel_1.extend(values[:100])
-            channel_2.extend(values[100:])
-            gain_list.append(metadata_bytes)
-            last_epoch = epoch_time
+                prev_seq = curr_seq
+                if lost > 0:
+                    if previous_median_ch1 is not None:
+                        for i in range(lost):
+                            channel_1.extend([previous_median_ch1]*100)
+                            channel_2.extend([previous_median_ch2]*100)
+                try:
+                    values = [v[0] for v in struct.iter_unpack("<i", payload[:-3])]
+                    previous_median_ch1 = np.median(values[:100])
+                    previous_median_ch2 = np.median(values[100:])
+                except struct.error:
+                    logger.warning("frame %s: failed to unpack payload, skipping", frame_counter)
+                    continue
 
-        return channel_1, channel_2, gain_list, last_epoch
+                if len(values) != 200:
+                    logger.warning("frame %s: unexpected sample count %d, skipping", frame_counter, len(values))
+                    continue
+
+                channel_1.extend(values[:100])
+                channel_2.extend(values[100:])
+                calculate_packet_loss += lost
+                gain_list.append(metadata_bytes)
+            
+            if sensor_type == 2:
+                # print("----------")
+                
+                try:
+                    fsr = struct.unpack("<H", payload[:-3])[0]
+                    fsr_values.append(fsr)
+                    fsr_time.append(epoch_time)
+                    prev_seq = frame_counter
+                except struct.error:
+                    logger.warning("frame %s: failed to unpack payload for fsr, skipping", frame_counter)
+
+            if sensor_type == 3:
+                try:
+                    # env_data = struct.unpack("<H", payload[:-3])[0]
+                    prev_seq = frame_counter
+                except struct.error:
+                    logger.warning("frame %s: failed to unpack payload for env_data, skipping", frame_counter)
+            
+
+            
+            epoch_time_list.append(epoch_time) 
+            total_frames += 1
+
+
+
+        return channel_1, channel_2, gain_list, epoch_time_list, header_meta_data, fsr_values, fsr_time, calculate_packet_loss, total_frames

@@ -6,9 +6,11 @@ from scipy.signal import butter, sosfiltfilt, filtfilt, savgol_filter
 import numpy as np
 from src.process_data.parser import Reader
 import sys
+import numpy as np
+from datetime import datetime
 import re
 import os, base64
-
+sys.path.append("/Users/chinmay/test_code")
 
 UPLOAD_DIR = "data/uploaded_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -80,6 +82,7 @@ app.layout = html.Div(id="page-wrapper", className="center-layout", children=[
             ]),
 
             html.Div(id="current-file-label", className="file-label"),
+            html.Div(id="header-time-label", className="header-time"),
 
             html.Div(className="spacer"),
             html.Button("Next ▶", id="next-btn")
@@ -181,6 +184,7 @@ def show_current_filename(path):
 
 @app.callback(
     Output("mega-plot", "figure"),
+    Output("header-time-label", "children"),
     Input("generate-btn", "n_clicks"),
     Input("file-selector", "value"),
     State("hr-start", "value"),
@@ -191,13 +195,20 @@ def show_current_filename(path):
 )
 def update_plots(_, filepath, hr_s, hr_e, rr_s, rr_e):
 
-    ch1, ch2, _, _ = Reader(filepath).read_channels()
+    # ch1, ch2, _, _ = Reader(filepath).read_channels()
+    ch1, ch2, gain_list, last_epoch, header_meta_data, fsr_values, fsr_time, calculate_packet_loss, total_frames = Reader(filepath).read_channels()
+    fs = round(((calculate_packet_loss + total_frames) * 100) / ((last_epoch[-1] - last_epoch[0]) / 1000))
     ch1 = ch2
-    ch1 = downsample(np.array(ch1), 1000, 250)
-    ch2 = downsample(np.array(ch2), 1000, 250)
+    ch1 = downsample(np.array(ch1), fs, 250)
+    ch2 = downsample(np.array(ch2), fs, 250)
     # ch1 = ch1 - savgol_filter(np.array(ch1), 5000, 2)
     # ch2 = ch2 - savgol_filter(np.array(ch2), 5000, 2)
 
+    header_time = int(header_meta_data["Timestamp"])
+    header_time_text = (
+        "Start Time: "
+        + datetime.fromtimestamp(header_time).strftime("%Y-%m-%d %H:%M:%S")
+    )
     fs = 250
     t = np.arange(len(ch1)) / fs
 
@@ -267,7 +278,7 @@ def update_plots(_, filepath, hr_s, hr_e, rr_s, rr_e):
         showlegend=False
     )
 
-    return fig
+    return fig, header_time_text
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    app.run(debug=True)
